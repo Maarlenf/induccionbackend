@@ -20,8 +20,6 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 });
 
 Route::post('/create-product', [ProductsController::class, "createNewProduct"]);
-Route::post('/create-product-variants', [ProductsController::class, "createOneVariant"]);
-Route::post('/create-product-custom-fields', [ProductsController::class, "createCustomField"]); 
 Route::put("/edit-variant", [ProductsController::class, "modifyExistingVariant"]);
 
 Route::get("/prueba", [ProductsController::class, "prueba"]);

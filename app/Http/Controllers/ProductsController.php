@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use GuzzleHttp\Promise\Utils;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
@@ -37,7 +38,7 @@ class ProductsController extends Controller
             file_put_contents($file_path, json_encode($new_data));
             return $new_data;
         }
-       
+
         return json_decode($file_data, true);
     }
 
@@ -72,8 +73,8 @@ class ProductsController extends Controller
             return $sku['product']['sku'];
         }, $getJustSku);
 
-       
-        return in_array($skus, $justNumbers) || in_array($skus, $getJustThisSku) ? "Sku encontrado" : "no existe" ;
+
+        return in_array($skus, $justNumbers) || in_array($skus, $getJustThisSku) ? "Sku encontrado" : "no existe";
     }
 
     // función para realizar validación y ver si el sku existe o no en la data
@@ -87,7 +88,9 @@ class ProductsController extends Controller
     // función para traer toda la información según el id
     function getId($skus)
     {
-        $data = $this->getDataJumpseller();
+        $file_path = 'data-jumpseller.json';
+        $pathData = file_get_contents($file_path);
+        $data = json_decode($pathData, true);
         $getInfoProductForSku = Arr::where($data, function ($sku) use ($skus) {
             if ($sku['product']['sku'] == $skus) {
                 return $sku;
@@ -123,7 +126,7 @@ class ProductsController extends Controller
                 return $sku;
             }
         });
-       
+
         return $getInfoProduct;
     }
 
@@ -146,29 +149,38 @@ class ProductsController extends Controller
             file_put_contents($file_path, json_encode($data));
             return json_decode($file_path, true);
         }
-       
+    }
+
+    public function dataStockFixlabs()
+    {
+        $file_path = 'data-stock.json';
+        $response = Http::get("https://induccion.fixlabsdev.com/api/products/stock");
+        $data = $response->json();
+        if (file_exists($file_path)) {
+            // Lee los datos del archivo de almacenamiento en caché
+            $data = file_get_contents($file_path);
+            $data = json_decode($data, true);
+            return $data;
+        }
     }
 
 
     // función para traer el stock según sku y talla
-    function getStock($data, $sku)
+    function getStock($data, $sku, $size)
     {
-        $sizes = [34, 35, 36, 37];
-        foreach ($sizes as $size) {
-            # code...
-            foreach ($data as $value) {
-                if (array_key_exists($sku, $value)) {
-                    foreach ($value as $content) {
-                        foreach ($content as $prod) {
-                            $sk1_stock[] = Arr::where($prod['variants'], function ($value, $key) use ($sku, $size) {
-                                return $value['sku'] === $sku . '-' . $size;
-                            });
-                        }
+        $sk1_stock = [];
+        # code...
+        foreach ($data as $value) {
+            if (array_key_exists($sku, $value)) {
+                foreach ($value as $content) {
+                    foreach ($content as $prod) {
+                        $sk1_stock[] = Arr::where($prod['variants'], function ($value, $key) use ($sku, $size) {
+                            return $value['sku'] === $sku . '-' . $size;
+                        });
                     }
                 }
             }
         }
-       
         return Arr::flatten($sk1_stock, 1);
     }
 
@@ -184,11 +196,16 @@ class ProductsController extends Controller
     }
 
 
+
     // función que me muestra el ordenado por talla y stock
     public function getStockForSize($sku)
     {
-        $response = Http::get("https://induccion.fixlabsdev.com/api/products/stock");
-        $data = $response->json();
+        $file_path = 'data-stock.json';
+        $data = file_get_contents($file_path);
+        $data = json_decode($data, true);
+        $arraySizes = [34, 35, 36, 37];
+        $newStock = [];
+
         $stock_sku1_34 = $this->getStock($data, $sku, '34');
         $stock_sku1_35 = $this->getStock($data, $sku, '35');
         $stock_sku1_36 = $this->getStock($data, $sku, '36');
@@ -209,7 +226,6 @@ class ProductsController extends Controller
             $carry += $item;
             return $carry;
         });
-       
         return $stockTotal;
     }
 
@@ -230,8 +246,50 @@ class ProductsController extends Controller
                 'permalink' => $dataProduct['name'],
             ]))
         ];
-       
+
         return $formatNewProduct;
+    }
+
+
+
+    // función para crear formato de nueva variante inicializada en 0
+    public function createFormatOfVariants($sku, $size, $price)
+    {
+        $createVariants = [
+            'variant' =>
+            [
+                'price' => $price,
+                'sku' => $sku . '-' . $size,
+                'stock' => 0,
+                'stock_unlimited' => false,
+                "options" => [
+                    [
+                        "product_option_id" => 0,
+                        "product_option_value_id" => 0,
+                        "name" => "talla",
+                        "option_type" => "option",
+                        "value" => "{$size}",
+                        "custom" => null,
+
+                    ]
+                ]
+            ],
+        ];
+
+        return $createVariants;
+    }
+
+    // función para crear el custom field del sku
+    function createFormatCustomer($sku)
+    //     "id": 58590,
+    //     "label": "sku",
+    {
+        $customer = ['field' => [
+            'id' => 58590,
+            "value" => $sku,
+        ]];
+
+        return $customer;
     }
 
     // función que crea el producto
@@ -244,82 +302,12 @@ class ProductsController extends Controller
 
         if ($response->getStatusCode() === 200) {
             $data = $response->json();
-            echo "hola";
             return $data['product']['id'];
         } else {
             echo 'Error al crear el producto: ' . $response->getBody();
-            return 'error al crear el producto';
         }
-       
     }
 
-   
-
-    // función para crear formato de nueva variante inicializada en 0
-    public function createFormatOfVariants($sku, $size, $price)
-    {
-            $createVariants = [
-                'variant' =>
-                [
-                    'price' => $price,
-                    'sku' => $sku . '-' . $size,
-                    'stock' => 0,
-                    'stock_unlimited' => false,
-                    "options" => [
-                        [
-                            "product_option_id" => 0,
-                            "product_option_value_id" => 0,
-                            "name" => "talla",
-                            "option_type" => "option",
-                            "value" => "{$size}",
-                            "custom" => null,
-    
-                        ]
-                    ]
-                ],
-            ];
-           
-        return $createVariants;
-    }
-
-    // función que llama el formato de la variante y la crea
-    public function createVariants($id, $sku, $price)
-    {
-        // $getInfoForId = $this->getId($sku);
-        // $cutId = Arr::pluck($getInfoForId, 'product.id');
-        // $getNumber = Arr::first($cutId);
-        $arraySizes = [34, 35, 36, 37];
-        $login = 'aef289b9ba55306de168573aa4051850';
-        $token = 'cef7c147a23884668554025eef4b4278';
-        $url = "https://api.jumpseller.com/v1/products/{$id}/variants.json";
-        $idVariants = [];
-        foreach($arraySizes as $size){
-            $variant = $this->createFormatOfVariants($sku, $size, $price);
-            $response = Http::withBasicAuth($login, $token)->post($url, $variant);
-            if ($response->getStatusCode() === 200) {
-                echo 'Variante creada correctamente:  {status: succes}' ;
-                $data = $response->json();
-                $idVariants[]= [$size => ['id' => $data['variant']['id']]];
-            } else {
-                echo 'Error al crear variante: ' . $response->getBody();
-            }
-        }
-       
-        return $idVariants;
-    }
-
-    // función para crear el custom field del sku
-    function createFormatCustomer($sku)
-    //     "id": 58590,
-    //     "label": "sku",
-    {
-        $customer = ['field' => [
-            'id' => 58590,
-            "value" => $sku,
-        ]];
-       
-        return $customer;
-    }
 
 
     // función para crear custom field
@@ -331,32 +319,52 @@ class ProductsController extends Controller
         $url = "https://api.jumpseller.com/v1/products/{$id}/fields.json";
 
         $response = Http::withBasicAuth($login, $token)->post($url, $customer);
-        if ($response->getStatusCode() === 200) {
-           
-            echo 'Custom field creado correctamente:  {status: success}';
+        if ($response->getStatusCode() == 200) {
+            echo '- ' . $sku . ': Producto creado exitosamente con sus variantes y custom field de sku. ';
         } else {
             echo 'Error al crear custom field: ' . $response->getBody();
         }
-       
     }
 
-     // función que llama las anteriores para poder crear de manera correcta el producto en caso de que este exista lanza mensaje que ya existe
-     public function callCreateProduct($sku)
-     {
-             $validate = $this->existProductinJumpseller($sku);
-             if ($validate != 'Sku encontrado') {
-                 $getAllDataNew = $this->dataFixlabs();
-                 $getInfoNew = $this->getSkuFixlabs($getAllDataNew, $sku);
-                 $dataAccesible = Arr::collapse($getInfoNew);
-                 $getInfoProduct = $this->formatToCreate($dataAccesible);
-                 $idProduct = $this->createProduct($getInfoProduct);
-                 $idsVariants = $this->createVariants($idProduct, $sku, $dataAccesible['price']);
-                 $this->addCustomFields($idProduct ,$sku);
-                
-             } else {
-                 return 'este producto ha sido encontrado dentro de la data de jumpseller';
-             }
-     }
+    // función que llama el formato de la variante y la crea
+    public function createVariants($id, $sku, $price)
+    {
+        $arraySizes = [34, 35, 36, 37];
+        $login = 'aef289b9ba55306de168573aa4051850';
+        $token = 'cef7c147a23884668554025eef4b4278';
+        $url = "https://api.jumpseller.com/v1/products/{$id}/variants.json";
+        $idVariants = [];
+        foreach ($arraySizes as $size) {
+            $variant = $this->createFormatOfVariants($sku, $size, $price);
+            $response = Http::withBasicAuth($login, $token)->post($url, $variant);
+            if ($response->getStatusCode() === 200) {
+                $data = $response->json();
+                $idVariants[] = [$sku . '-' . $size => ['id' => $data['variant']['id']]];
+            } else {
+                echo 'Error al crear variante: ' . $response->getBody();
+            }
+        };
+        return $idVariants;
+    }
+
+
+
+    // función que llama las anteriores para poder crear de manera correcta el producto en caso de que este exista lanza mensaje que ya existe
+    public function callCreateProduct($sku, $validate)
+    {
+        //  $validate = $this->existProductinJumpseller($sku);
+        if ($validate != 'Sku encontrado') {
+            $getAllDataNew = $this->dataFixlabs();
+            $getInfoNew = $this->getSkuFixlabs($getAllDataNew, $sku);
+            $dataAccesible = Arr::collapse($getInfoNew);
+            $getInfoProduct = $this->formatToCreate($dataAccesible);
+            $idProduct = $this->createProduct($getInfoProduct);
+            $idsVariants = $this->createVariants($idProduct, $sku, $dataAccesible['price']);
+            $this->addCustomFields($idProduct, $sku);
+        } else {
+            return [$sku => 'Este producto ha sido encontrado dentro de la data de jumpseller'];
+        }
+    }
 
 
     // función para traer el id de cada variante según el sku padre
@@ -376,43 +384,21 @@ class ProductsController extends Controller
                 return $id;
             }
         });
-       
-        return Arr::first($getIdforSize);
-    }
 
-    // función que llama el precip de cierta variante 
-    public function callPriceOfVariant($data, $size)
-    {
-        $allVariant = Arr::pluck($data, 'product.variants');
-        // dd($allVariant);
-        $joinArraysVariants = Arr::collapse($allVariant);
-        $getPriceOfVariant = Arr::map($joinArraysVariants, function ($id) use ($size) {
-            $getSkuAndSize = $id['sku'];
-            $justSize = Str::substr($getSkuAndSize, -2);
-            if ($justSize == $size) {
-                return $id['price'];
-            }
-        });
-        // dd($getPriceOfVariant);
-        $getPriceforSize = Arr::where($getPriceOfVariant, function ($price) {
-            if ($price != null) {
-                return $price;
-            }
-        });
-        return Arr::first($getPriceforSize);
+        return Arr::first($getIdforSize);
     }
 
     // función que crea el formato para editar la variante  
     public function formatToEditVariant($sku, $size)
     {
-        $dataFixLabs = $this->dataFixlabs();
-        $dataJumpseller = $this->getId($sku);
-        $stock_sku = $this->getStock($dataFixLabs, $sku, $size);
+
+        $file_path = 'data-stock.json';
+        $data = file_get_contents($file_path);
+        $dataStock = json_decode($data, true);
+        $stock_sku = $this->getStock($dataStock, $sku, $size);
         $getAllDataNew = $this->dataFixlabs();
         $getInfoNew = $this->getSkuFixlabs($getAllDataNew, $sku);
         $dataAccesible = Arr::collapse($getInfoNew);
-        $compareAtPrice = $this->callPriceOfVariant($dataJumpseller, $size);
-        $stock_sku = $this->getStock($dataFixLabs, $sku, $size);
 
         $createVariants = [
             'variant' =>
@@ -421,16 +407,12 @@ class ProductsController extends Controller
                 'sku' => $sku . '-' . $size,
                 'stock' => $this->sumStock($stock_sku),
                 'stock_unlimited' => false,
-                'compare_at_price' => $compareAtPrice,
+                'stock_threshold' => 0,
                 "options" => [
                     [
-                        "product_option_id" => 0,
-                        "product_option_value_id" => 0,
                         "name" => "talla",
                         "option_type" => "option",
                         "value" => "{$size}",
-                        "custom" => null,
-
                     ]
                 ]
             ],
@@ -439,68 +421,79 @@ class ProductsController extends Controller
     }
 
     // función que edita la variante
-    public function editVariants($sku, $size)
+    public function editVariants($sku)
+    {
+        $arraySizes = [34, 35, 36, 37];
+        $getInfoForId = $this->getId($sku);
+        $cutId = Arr::pluck($getInfoForId, 'product.id');
+        $getNumber = Arr::first($cutId);
+        $login = 'aef289b9ba55306de168573aa4051850';
+        $token = 'cef7c147a23884668554025eef4b4278';
+
+        foreach ($arraySizes as $size) {
+            # code...
+            $idVariant = $this->callIdOfVariant($getInfoForId, $size);
+            $variantModify = $this->formatToEditVariant($sku, $size);
+
+            $url = "https://api.jumpseller.com/v1/products/{$getNumber}/variants/{$idVariant}.json";
+            $response = Http::withBasicAuth($login, $token)->put($url, $variantModify);
+            if ($response->getStatusCode() === 200) {
+                $data = $response->json();
+                echo '| ' . $sku . ': Variante ' . $data['variant']['id'] . ' editada correctamente |';
+            } else {
+                echo 'Error al crear editar la variante: ' . $response->getBody();
+            }
+        }
+    }
+
+    public function editStatusProduct($sku)
     {
         $getInfoForId = $this->getId($sku);
         $cutId = Arr::pluck($getInfoForId, 'product.id');
         $getNumber = Arr::first($cutId);
-        $idVariant = $this->callIdOfVariant($getInfoForId, $size);
-        $variantModify = $this->formatToEditVariant($sku, $size);
+        $getStock = $this->getStockForSize($sku);
+        $stockTotal = $this->getStockTotal($getStock);
+        $urlProduct = "https://api.jumpseller.com/v1/products/{$getNumber}.json";
         $login = 'aef289b9ba55306de168573aa4051850';
         $token = 'cef7c147a23884668554025eef4b4278';
-        $url = "https://api.jumpseller.com/v1/products/{$getNumber}/variants/{$idVariant}.json";
-
-        $response = Http::withBasicAuth($login, $token)->put($url, $variantModify);
-        if ($response->getStatusCode() === 200) {
-            echo 'Variante editada correctamente: ' . $response;
+        $formatEditStatus = ['product' => ['status' => 'available']];
+        if ($stockTotal > 0) {
+            $response = Http::withBasicAuth($login, $token)->put($urlProduct, $formatEditStatus);
+            if ($response->getStatusCode() == 200) {
+                echo '| ' . $sku . ': producto habilitado |';
+            }
         } else {
-            echo 'Error al crear editar la variante: ' . $response->getBody();
+            echo '| ' . $sku . ': este producto tiene 0 stock |';
         }
     }
 
 
     // función que llama todo para la creación del producto
-    function arraySkus(){
+    function arraySkus()
+    {
         $arraySkus = ["8734-768-23580-34576", "1234-567-89012-34567", "5678-826-23456-78901"];
         return $arraySkus;
     }
     public function createNewProduct()
     {
-       $skus = $this->arraySkus();
-     // foreach ($skus as $sku) {
-        # code...
-        echo "creado";
-        $this->callCreateProduct($skus[0]);
-        $this->callCreateProduct($skus[1]);
-        $this->callCreateProduct($skus[2]);
-      // }
+        $skus = $this->arraySkus();
+        foreach ($skus as $sku) {
+            $validate = $this->existProductinJumpseller($sku);
+            if ($validate == 'Sku encontrado') {
+                return '- ' . $sku . ': ' . $validate;
+            } else {
+                $this->callCreateProduct($sku, $validate);
+            }
+        }
     }
-
-    // función que llama todo para crear una nueva variante especifica para talla 
-    // public function CreateOneVariant()
-    // {
-    //     $sku1 = "8734-768-23580-34576";
-    //     $sku2 = "1234-567-89012-34567";
-    //     $sku3 = '5678-826-23456-78901';
-    //     return $this->createVariants($sku2, 37);
-    // }
-
-    // función que llama todo para crear el custom field de sku
-    // public function createCustomField()
-    // {
-    //     $sku1 = "8734-768-23580-34576";
-    //     $sku2 = "1234-567-89012-34567";
-    //     $sku3 = '5678-826-23456-78901';
-    //     return $this->addCustomFields($sku2);
-    // }
 
     // función que llama todo para editar la variante existente 
     public function modifyExistingVariant()
     {
-        $sku1 = "8734-768-23580-34576";
-        $sku2 = "1234-567-89012-34567";
-        $sku3 = '5678-826-23456-78901';
-        $editVariant = $this->editVariants($sku2, 35);
-        return $editVariant;
+        $skus = $this->arraySkus();
+        foreach ($skus as $sku) {
+            $this->editVariants($sku);
+            $this->editStatusProduct($sku);
+        }
     }
 }
